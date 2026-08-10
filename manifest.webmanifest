@@ -1,7 +1,7 @@
 {
   "name": "CityLab — Boston",
   "short_name": "CityLab",
-  "description": "Boston in real time: multi-source events, transit, bikes, neighborhoods, and live city intelligence.",
+  "description": "Boston in real time: official Boston events, smart discovery, transit, bikes, neighborhoods, and live city intelligence.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

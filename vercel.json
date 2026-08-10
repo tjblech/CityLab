@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/boston-events.js": { "maxDuration": 10 }
+  }
+}

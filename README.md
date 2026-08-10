@@ -1,31 +1,36 @@
-# CityLab V2
+# CityLab V3
 
-Boston-first, mobile-first city intelligence PWA, continuing the original CityLab preview design.
+Boston-first, mobile-first city intelligence PWA based on the original CityLab preview.
 
-## V2 additions
+## What V3 adds
 
-- Event search, category, date, and price filtering
-- Event detail bottom sheets
-- Persistent saved event objects (works even after live feeds refresh)
-- Optional Ticketmaster Discovery API integration
-- MBTA upcoming-arrival predictions for central Boston hubs
-- "Use my location" nearby-transit lookup
-- Bluebikes GBFS with current station availability
-- Analyze Boston BOS:311 open-data probe and live source health
-- Richer Live City event markers and event details from the map
-- Live vs preview labeling throughout the UI
-- Updated offline cache/service worker
+- Multi-source event aggregation instead of a single event feed
+- Automatic Boston Special Event License Applications integration (no key required)
+- Optional Ticketmaster Discovery API layer for ticketed events
+- "Do Something" planner using real events currently known to CityLab
+- Neighborhood Pulse cards combining event activity with Bluebikes availability
+- Live City Replay from 6 PM through midnight
+- Working Saved → Optimize route ordering
+- Richer City Data dashboard: civic permits, busiest neighborhood, free-event share, bike-station count
+- Better source labeling and graceful fallback behavior
 
-## Event data
+## Existing live sources
 
-CityLab ships with a clearly labeled preview catalog so the interface always has something to render.
+- MBTA V3: alerts and arrival predictions
+- Bluebikes GBFS: live station/bike availability
+- Analyze Boston BOS:311
+- Analyze Boston Special Event License Applications
+- Ticketmaster Discovery API (optional key)
 
-For current ticketed events:
-1. Create a Ticketmaster developer API key.
-2. Open **More → Event integration**.
-3. Paste the key and tap **Connect**.
+## Event data behavior
 
-The key is kept only in browser localStorage. For a public production deployment, move API-key handling to a server/serverless proxy instead of publishing a secret in source code.
+CityLab V3 aggregates sources:
+
+1. Boston civic event permit records load automatically when the open-data source is reachable.
+2. If a Ticketmaster API key is configured, those ticketed events are added on top.
+3. If no live event source is reachable, CityLab falls back to clearly labeled preview cards so the interface remains usable.
+
+Permit records are public licensing records and may not contain the same completeness as a dedicated consumer event listing. CityLab labels them `CITY` and event detail sheets explain the limitation.
 
 ## Run locally
 
@@ -41,6 +46,7 @@ Static deployment works on GitHub Pages, Cloudflare Pages, Netlify, or Vercel.
 
 ## Notes
 
-- Public feeds can change shape or CORS behavior; every live adapter fails gracefully.
-- BOS:311 resource discovery is dynamic because the City periodically rotates dataset resources.
-- The custom map is intentionally dependency-free; real vector/map tiles remain a future upgrade.
+- Ticketmaster keys are stored only in browser localStorage in this prototype. A production public deployment should proxy secret-backed services server-side.
+- Public feeds can change schema or CORS behavior; adapters fail gracefully.
+- The map is still dependency-free and stylized rather than a full vector-tile map.
+- `DESIGN_REFERENCE.png` is the original CityLab preview and remains the visual target.

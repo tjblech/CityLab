@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#080d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="CityLab" />
+  <title>CityLab — Boston in real time</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <main id="screen" class="screen" aria-live="polite"></main>
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button class="nav-item active" data-tab="now" aria-label="Now">
+        <span class="nav-icon">⌂</span><span>Now</span>
+      </button>
+      <button class="nav-item" data-tab="discover" aria-label="Discover">
+        <span class="nav-icon">⌕</span><span>Discover</span>
+      </button>
+      <button class="nav-item" data-tab="live" aria-label="Live City">
+        <span class="nav-icon">▦</span><span>Live City</span>
+      </button>
+      <button class="nav-item" data-tab="saved" aria-label="Saved">
+        <span class="nav-icon">♡</span><span>Saved</span>
+      </button>
+      <button class="nav-item" data-tab="more" aria-label="More">
+        <span class="nav-icon">•••</span><span>More</span>
+      </button>
+    </nav>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>

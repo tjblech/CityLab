@@ -1,71 +1,67 @@
-# CityLab V5
+# CityLab V6
 
-Boston-first, mobile-first city intelligence PWA, continuing the original CityLab preview design.
+Boston-first, mobile-first city intelligence PWA, continuing the original CityLab design.
 
-## V5 highlights
+## V6 highlights
 
-### Live City map rebuilt
-- Replaced the old percentage-positioned SVG illustration with a real interactive Boston map powered by Leaflet 1.9.4 and OpenStreetMap tiles.
-- Pan, pinch/scroll zoom, reset to Boston, and opt-in device location.
-- Real geographic markers for coordinate-rich events and live Bluebike stations.
-- Approximate neighborhood-level event positions are shown with dashed pins instead of pretending they are precise.
-- MBTA hub markers use real station coordinates.
-- New Neighborhood Pulse layer derives activity from CityLab's current event + Bluebike data.
-- Layer toggles update without destroying or resetting the current map viewport.
-- Saved-only event map mode.
-- City Replay now covers the full 24-hour day instead of only 6 PM–midnight.
-- Scrubbing Replay updates event visibility without snapping the map back to its starting position.
-- Event detail sheets can jump directly to the event on Live City.
+### Much broader event coverage
+CityLab's event layer now combines:
+- City of Boston official event RSS
+- ArtsBoston / BosTix arts and culture calendar
+- Boston Public Library events
+- Boston Planning calendar
+- Boston Special Event License Applications
+- Optional Ticketmaster Discovery API listings
 
-### V4 discovery features retained
-- Boston.gov official event RSS adapter
-- Ticketmaster optional ticketed-event integration
-- Boston special-event permit layer
-- Smart cross-source event deduplication
-- Best Tonight, Free & Interesting, and Nearby discovery lanes
-- Recommended / Soonest / Nearby / Cheapest sorting
-- Personalization based on locally saved events
-- Event calendar/share/directions actions
-- MBTA alerts and predictions
-- Bluebikes GBFS
-- BOS:311 data probe
-- Do Something outing planner
-- Saved itinerary optimization
+The extra public calendars are fetched server-side through `api/calendar-events.js` so browser CORS does not block them. The function uses provider RSS/structured data where available and falls back to conservative HTML parsing when a calendar does not expose a simple public browser feed.
 
-## Map dependencies
+### Better discovery controls
+- New **Source** filter in Discover: All sources, Boston.gov, ArtsBoston, BPL, Ticketmaster, Boston Planning, or City permits.
+- Cross-source deduplication remains enabled. If two sources describe the same event, CityLab keeps the richer version and records all matched sources.
+- Source quality affects recommendations: rich official/arts listings rank higher; planning and permit records remain searchable without taking over Best Tonight.
+- New `Classes & Talks` category helps organize BPL programs, author talks, workshops, tours, and similar listings.
+- More → Sources shows each calendar independently with a live/fallback state and listing count.
 
-Leaflet 1.9.4 is loaded from the official Leaflet-recommended unpkg CDN. Map tiles come from the standard OpenStreetMap tile service with visible OpenStreetMap attribution.
+### V5 map retained
+- Real Leaflet + OpenStreetMap Boston map
+- Pan/zoom, location, event markers, MBTA hubs, Bluebikes, Neighborhood Pulse
+- Viewport-preserving layer toggles and replay
+- Solid precise pins vs dashed approximate locations
+- Event detail → Live Map handoff
 
-The rest of CityLab remains dependency-free. If Leaflet or map tiles are unavailable, Live City shows a graceful map-unavailable state while the rest of the PWA continues to work.
+## Serverless calendar aggregator
 
-For a high-traffic public deployment, use a production map-tile provider that fits your expected usage rather than relying on the community OpenStreetMap tile servers at scale.
+`api/calendar-events.js` is intended for Vercel. It currently pulls:
+- `https://bpl.bibliocommons.com/v2/events`
+- `https://bostix.org`
+- `https://www.bostonplans.org/news-calendar/calendar?rss=relationship`
 
-## Event data
+The response is cached at the edge for 10 minutes with stale-while-revalidate.
 
-CityLab keeps a preview catalog so the interface always renders even when public feeds are unavailable.
+If you deploy only as static GitHub Pages, the rest of CityLab still works, but these three added calendars will show as fallback because `/api/calendar-events` requires a serverless runtime. Vercel deployment enables the full V6 calendar mix.
 
-For current ticketed events:
+## Ticketmaster
+
+Ticketmaster remains optional:
 1. Create a Ticketmaster Discovery API key.
 2. Open **More → Event integration**.
 3. Paste the key and tap **Connect**.
 
-The key is stored only in browser localStorage. For a public production deployment, proxy API-key requests server-side instead of shipping a secret to clients.
+The key is stored in browser localStorage. For a public production deployment, move Ticketmaster requests behind a server-side proxy.
 
 ## Run locally
 
+Static UI:
 ```bash
 python -m http.server 8080
 ```
 
-Open `http://localhost:8080`.
-
-## Deploy
-
-Static deployment works on GitHub Pages, Cloudflare Pages, Netlify, or Vercel. The included Vercel function can proxy Boston.gov RSS when direct browser CORS blocks it.
+The Vercel calendar functions will not run under Python's static server. Use Vercel's local development runtime if you want to test the extra calendar sources locally.
 
 ## Notes
 
-- Public feeds can change shape or CORS behavior; live adapters fail gracefully.
-- BOS:311 resource discovery is dynamic because Boston periodically rotates dataset resources.
-- City Replay is still a modeled time-of-day view, not accumulated historical city telemetry yet.
-- Neighborhood Pulse is a CityLab-derived signal, not an official Boston activity metric.
+- Third-party public calendar markup can change; every additional calendar fails independently so one broken source does not take down Discover.
+- BPL can contain a very large number of programs, including recurring and long-running exhibitions. CityLab caps and ranks imported items so they do not swamp other sources.
+- Boston Planning events are useful civic data but intentionally rank lower than arts, library, city-event and ticketed listings in general recommendations.
+- ArtsBoston covers Greater Boston, so some listings may be in nearby Cambridge, Somerville, Brookline, etc.
+- City Replay remains a modeled time-of-day view, not accumulated historical city telemetry yet.

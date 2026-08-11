@@ -1,50 +1,55 @@
-# CityLab V4
+# CityLab V5
 
 Boston-first, mobile-first city intelligence PWA, continuing the original CityLab preview design.
 
-## V4 additions
+## V5 highlights
 
-- Official **City of Boston events RSS** layer in addition to City event permits
-- Smarter multi-source event deduplication and field merging
-- Source quality / event richness scoring
-- **Best Tonight** recommendations based on timing, source quality, detail richness, and what you save
-- **Free & Interesting** discovery lane for local programming that ticket apps tend to bury
-- Optional **Near You** sorting using on-device geolocation
+### Live City map rebuilt
+- Replaced the old percentage-positioned SVG illustration with a real interactive Boston map powered by Leaflet 1.9.4 and OpenStreetMap tiles.
+- Pan, pinch/scroll zoom, reset to Boston, and opt-in device location.
+- Real geographic markers for coordinate-rich events and live Bluebike stations.
+- Approximate neighborhood-level event positions are shown with dashed pins instead of pretending they are precise.
+- MBTA hub markers use real station coordinates.
+- New Neighborhood Pulse layer derives activity from CityLab's current event + Bluebike data.
+- Layer toggles update without destroying or resetting the current map viewport.
+- Saved-only event map mode.
+- City Replay now covers the full 24-hour day instead of only 6 PM–midnight.
+- Scrubbing Replay updates event visibility without snapping the map back to its starting position.
+- Event detail sheets can jump directly to the event on Live City.
+
+### V4 discovery features retained
+- Boston.gov official event RSS adapter
+- Ticketmaster optional ticketed-event integration
+- Boston special-event permit layer
+- Smart cross-source event deduplication
+- Best Tonight, Free & Interesting, and Nearby discovery lanes
 - Recommended / Soonest / Nearby / Cheapest sorting
-- A compact **Tonight's Brief** on the Now screen
-- Event actions: **Add to Calendar (.ics)**, Share, and Directions
-- Multi-source badges in event details when listings are merged
-- Tiny optional Vercel proxy for the Boston.gov RSS feed when direct browser CORS blocks it
-- Everything from V3 remains: MBTA arrivals/alerts, Bluebikes, 311, Live City, Replay, Do Something, Neighborhood Pulse, saved routing, Ticketmaster integration, and offline PWA support
+- Personalization based on locally saved events
+- Event calendar/share/directions actions
+- MBTA alerts and predictions
+- Bluebikes GBFS
+- BOS:311 data probe
+- Do Something outing planner
+- Saved itinerary optimization
 
-## Event sources
+## Map dependencies
 
-CityLab V4 attempts to combine:
+Leaflet 1.9.4 is loaded from the official Leaflet-recommended unpkg CDN. Map tiles come from the standard OpenStreetMap tile service with visible OpenStreetMap attribution.
 
-1. **Boston.gov events RSS** — official public event listings and free City programming.
-2. **Boston Special Event License Applications** — useful civic/local event records, but treated as permit records rather than polished consumer listings.
-3. **Ticketmaster Discovery API** — optional ticketed events such as concerts, sports, and comedy.
-4. **Preview catalog** — only used when live event layers cannot load.
+The rest of CityLab remains dependency-free. If Leaflet or map tiles are unavailable, Live City shows a graceful map-unavailable state while the rest of the PWA continues to work.
 
-Overlapping events are deduplicated. A richer official/event listing is preferred over a sparse permit record, while useful fields from both can be retained.
+For a high-traffic public deployment, use a production map-tile provider that fits your expected usage rather than relying on the community OpenStreetMap tile servers at scale.
 
-## Ticketmaster
+## Event data
 
-For additional current ticketed events:
+CityLab keeps a preview catalog so the interface always renders even when public feeds are unavailable.
 
-1. Create a Ticketmaster developer API key.
+For current ticketed events:
+1. Create a Ticketmaster Discovery API key.
 2. Open **More → Event integration**.
 3. Paste the key and tap **Connect**.
 
-The browser-key flow is fine for personal use. For a public production deployment, keep secrets in a server/serverless environment rather than committing them to source.
-
-## Boston.gov RSS and Vercel
-
-CityLab first tries the public Boston.gov RSS feed directly. Some hosting/browser combinations may block cross-origin RSS requests.
-
-V4 includes `api/boston-events.js`, a tiny same-origin Vercel proxy. If you deploy the repo to Vercel, CityLab automatically falls back to this endpoint when the direct RSS request fails.
-
-The rest of CityLab still works on static hosts such as GitHub Pages; only the optional proxy endpoint is unavailable there.
+The key is stored only in browser localStorage. For a public production deployment, proxy API-key requests server-side instead of shipping a secret to clients.
 
 ## Run locally
 
@@ -56,12 +61,11 @@ Open `http://localhost:8080`.
 
 ## Deploy
 
-- **Vercel:** recommended for V4 because the Boston.gov RSS proxy works automatically.
-- **GitHub Pages / Cloudflare Pages / Netlify:** the static PWA works; live cross-origin feeds remain subject to each source's CORS behavior.
+Static deployment works on GitHub Pages, Cloudflare Pages, Netlify, or Vercel. The included Vercel function can proxy Boston.gov RSS when direct browser CORS blocks it.
 
 ## Notes
 
-- Live public feeds can change shape or CORS behavior; adapters fail gracefully.
-- Location is kept only in page memory for nearby sorting; V4 does not persist your coordinates.
-- City Replay remains a modeled visualization until CityLab begins storing its own historical snapshots.
-- The custom map remains dependency-free; vector map tiles are still a future upgrade.
+- Public feeds can change shape or CORS behavior; live adapters fail gracefully.
+- BOS:311 resource discovery is dynamic because Boston periodically rotates dataset resources.
+- City Replay is still a modeled time-of-day view, not accumulated historical city telemetry yet.
+- Neighborhood Pulse is a CityLab-derived signal, not an official Boston activity metric.

@@ -21,6 +21,20 @@ const WHEN_FILTERS = ['Tonight','Tomorrow','This weekend','7 days'];
 const PRICE_FILTERS = ['Any price','Free','Under $30'];
 const SORT_OPTIONS = ['Recommended','Soonest','Nearby','Cheapest'];
 const BOUNDS = { minLat:42.29, maxLat:42.405, minLon:-71.19, maxLon:-70.96 };
+const BOSTON_CENTER = [42.3555,-71.0656];
+const TRANSIT_HUBS = [
+  {name:'Park Street',lat:42.3564,lon:-71.0624,route:'Green / Red',tone:'green'},
+  {name:'Downtown Crossing',lat:42.3555,lon:-71.0602,route:'Orange / Red',tone:'orange'},
+  {name:'South Station',lat:42.3523,lon:-71.0552,route:'Red / Commuter Rail',tone:'red'},
+  {name:'North Station',lat:42.3656,lon:-71.0613,route:'Green / Orange',tone:'green'},
+  {name:'Back Bay',lat:42.3474,lon:-71.0757,route:'Orange / Commuter Rail',tone:'orange'},
+  {name:'Kenmore',lat:42.3489,lon:-71.0952,route:'Green Line',tone:'green'},
+  {name:'Harvard',lat:42.3734,lon:-71.1190,route:'Red Line',tone:'red'},
+  {name:'Aquarium',lat:42.3598,lon:-71.0517,route:'Blue Line',tone:'blue'}
+];
+let liveMap=null;
+let mapLayerGroups={};
+let userMapMarker=null;
 const NEIGHBORHOODS = [
   {name:'Cambridge',x:31,y:23,vibe:'Creative',tags:['museums','food','ideas']},
   {name:'Allston',x:22,y:39,vibe:'Local',tags:['live music','dives','late']},
@@ -57,8 +71,9 @@ const state = {
   city311:{ loading:true, today:null, error:null, resource:null },
   saved:loadSavedMap(),
   category:'All', when:'Tonight', price:'Any price', sort:'Recommended', query:'',
-  layers:{ events:true, transit:true, bikes:true, traffic:true },
+  layers:{ events:true, transit:true, bikes:true, pulse:true },
   cityTime:new Date(), activeEvent:null, replayHour:new Date().getHours(), plannerOpen:false,
+  mapSavedOnly:false, mapFocusEventId:null, mapView:null,
   planner:{when:'Tonight',budget:'Under $30',vibe:'Surprise me'}, plan:[],
   ticketmasterKey:localStorage.getItem('citylab.ticketmasterKey') || '',
   userLoc:null,
@@ -99,6 +114,10 @@ function normalizeCategory(segment='',genre='',sub=''){
   return 'Events';
 }
 function posFromLatLon(lat,lon){ const x=(lon-BOUNDS.minLon)/(BOUNDS.maxLon-BOUNDS.minLon)*100; const y=(BOUNDS.maxLat-lat)/(BOUNDS.maxLat-BOUNDS.minLat)*100; return {x:Math.max(3,Math.min(97,x)),y:Math.max(6,Math.min(88,y))}; }
+function latLonFromPos(x,y){ return {lat:BOUNDS.maxLat-(y/100)*(BOUNDS.maxLat-BOUNDS.minLat),lon:BOUNDS.minLon+(x/100)*(BOUNDS.maxLon-BOUNDS.minLon)}; }
+function eventLatLon(e){ if(Number.isFinite(e?.lat)&&Number.isFinite(e?.lon))return {lat:e.lat,lon:e.lon,estimated:false}; if(Number.isFinite(e?.x)&&Number.isFinite(e?.y))return {...latLonFromPos(e.x,e.y),estimated:true}; return null; }
+function formatHour(h){ const hh=h===24?0:h; if(hh===0)return '12 AM'; if(hh===12)return '12 PM'; return `${hh>12?hh-12:hh} ${hh>=12?'PM':'AM'}`; }
+function hourDistance(a,b){ const d=Math.abs(a-b); return Math.min(d,24-d); }
 
 function nearestNeighborhoodByXY(x,y){ if(!Number.isFinite(x)||!Number.isFinite(y))return NEIGHBORHOODS.find(n=>n.name==='Downtown'); return NEIGHBORHOODS.slice().sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0]; }
 function neighborhoodFromText(text=''){ const t=text.toLowerCase(); const aliases=[['Fenway',['fenway','kenmore']],['Back Bay',['back bay','copley','newbury']],['Seaport',['seaport','fort point','fan pier']],['South End',['south end','sowa']],['North End',['north end','hanover']],['Allston',['allston','brighton']],['Cambridge',['cambridge','harvard','central square','kendall']],['East Boston',['east boston','eastie']],['Jamaica Plain',['jamaica plain','jp ']],['Dorchester',['dorchester']],['Roxbury',['roxbury']],['Charlestown',['charlestown']],['Downtown',['downtown','city hall','boston common','downtown crossing','faneuil','government center']]]; for(const [name,keys] of aliases)if(keys.some(k=>t.includes(k)))return name; return ''; }
@@ -198,33 +217,148 @@ function renderDiscover(){ const filtered=filteredEvents(); const liveCount=stat
   <div class="section"><div class="section-head"><div><div class="section-title">${esc(state.when)} in Boston</div><div class="microcopy">${state.events.error?esc(state.events.error):liveCount?`${liveCount} current listings across ${state.events.source}`:'Preview catalog until a live source loads'}</div></div><span class="pill">${filtered.length} results</span></div><div class="card">${filtered.map(e=>eventRow(e,true)).join('')||'<div class="empty"><div class="big">⌕</div><b>No matches</b><p style="margin-top:6px">Try a broader category, date, or price.</p></div>'}</div></div>
   <div class="section"><div class="section-head"><div><div class="section-title">Neighborhood pulse</div><div class="microcopy">Events + live Bluebike activity</div></div></div>${renderNeighborhoods()}</div>`; }
 
-function cityMapSvg(){ return `<svg viewBox="0 0 500 760" preserveAspectRatio="none" aria-hidden="true"><defs><filter id="glow"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><path d="M0 170 C80 150 120 200 195 184 C260 170 292 134 344 156 C392 175 420 229 500 224" fill="none" stroke="#0b3248" stroke-width="22" opacity=".6"/><path d="M275 0 C272 90 294 137 325 184 C362 240 372 303 363 371 C354 450 399 501 500 535" fill="none" stroke="#0c2d40" stroke-width="18" opacity=".5"/><g stroke="#1d2b38" stroke-width="1" opacity=".72">${Array.from({length:14},(_,i)=>`<path d="M${-40+i*42} 0 L${90+i*34} 760"/>`).join('')}${Array.from({length:14},(_,i)=>`<path d="M0 ${40+i*52} L500 ${10+i*48}"/>`).join('')}</g><g fill="none" stroke-width="3" filter="url(#glow)"><path d="M45 390 C140 380 192 374 256 354 C330 332 397 320 472 308" stroke="#4db25a"/><path d="M130 610 C178 541 205 480 251 423 C292 370 350 320 455 240" stroke="#ea8c36"/><path d="M230 710 C245 605 259 517 276 445 C290 376 302 300 312 190" stroke="#cf4454"/><path d="M0 250 C87 270 153 302 224 337 C294 372 381 404 500 426" stroke="#397dd1"/></g><g fill="#dbe8ee" opacity=".42">${Array.from({length:45},(_,i)=>`<circle cx="${(i*83)%500}" cy="${60+((i*131)%610)}" r="1.4"/>`).join('')}</g></svg>`; }
-function mapMarkers(){ const h=state.replayHour; const ev=state.events.items.filter(e=>Number.isFinite(e.x)&&Number.isFinite(e.y)).slice(0,28).map(e=>{let alpha=1;if(e.start){const eh=new Date(e.start).getHours();const hh=h===24?0:h;alpha=(Math.abs(eh-hh)<=2||Math.abs(eh-hh)>=22)?1:.22;}return `<button class="map-marker marker-event ${state.layers.events?'':'hidden'}" style="left:${e.x}%;top:${e.y}%;opacity:${alpha}" title="${esc(e.title)}" data-open-event="${esc(e.id)}">${esc(e.icon||'♫')}</button>`}).join('');
-  const transit=[{x:48,y:43},{x:54,y:48},{x:41,y:57},{x:58,y:38},{x:63,y:31},{x:35,y:34}].map(p=>`<div class="map-marker marker-transit ${state.layers.transit?'':'hidden'}" style="left:${p.x}%;top:${p.y}%">T</div>`).join('');
-  const traffic=[{x:57,y:49},{x:46,y:61},{x:67,y:56},{x:32,y:49}].map(p=>`<div class="map-marker marker-traffic ${state.layers.traffic?'':'hidden'}" style="left:${p.x}%;top:${p.y}%">⌁</div>`).join('');
-  const bikes=(state.bikes.stations.length?state.bikes.stations.slice(0,22):[{lat:42.352,lon:-71.055},{lat:42.360,lon:-71.093},{lat:42.346,lon:-71.081},{lat:42.373,lon:-71.120},{lat:42.338,lon:-71.034},{lat:42.365,lon:-71.060}]).map(s=>{const p=posFromLatLon(Number(s.lat),Number(s.lon));return `<div class="map-marker marker-bike ${state.layers.bikes?'':'hidden'}" style="left:${p.x}%;top:${p.y}%" title="${esc(s.name||'Bluebikes station')}">♧</div>`}).join(''); return ev+transit+traffic+bikes; }
-
-function renderLive(){ const h=state.replayHour; const isNow=Math.abs((h===24?0:h)-new Date().getHours())<=1; const count=replayEventCount(h); return `<header class="header"><div><h1 style="font-size:30px">LIVE CITY</h1><div class="subhead">Boston ${isNow?'in real time':'replayed at '+(h===24?'12 AM':(h>12?h-12:h)+' PM')}.</div></div><div class="header-actions"><button class="icon-btn" data-location>⌖</button><button class="icon-btn" data-refresh>↻</button></div></header><div class="map-shell"><div class="map-art">${cityMapSvg()}</div><div class="map-filters">${[['events','● Events'],['transit','T Transit'],['bikes','♧ Bikes'],['traffic','⌁ Traffic']].map(([k,l])=>`<button class="map-filter ${state.layers[k]?'active':''}" data-layer="${k}">${l}</button>`).join('')}</div><span class="map-label" style="left:15%;top:21%">Cambridge</span><span class="map-label" style="left:66%;top:19%">Charlestown</span><span class="map-label" style="left:78%;top:30%">East Boston</span><span class="map-label" style="left:17%;top:53%">Back Bay</span><span class="map-label" style="left:47%;top:64%">South End</span><span class="map-label" style="left:70%;top:68%">South Boston</span><span class="map-label" style="left:18%;top:76%">Roxbury</span><span class="map-label" style="left:58%;top:82%">Dorchester</span><span class="map-center-label">BOSTON</span>${mapMarkers()}<div class="map-bottom"><div class="scrub-label"><b id="scrubTitle">${isNow?'Now':'City Replay'} · ${h===24?'12:00 AM':(h>12?h-12:h)+':00 PM'}</b><button class="live-reset ${isNow?'is-live':''}" data-live-now><span class="live-dot"></span>${isNow?'Live':'Return live'}</button></div><input class="scrubber" id="timeScrubber" type="range" min="18" max="24" value="${Math.min(24,Math.max(18,h))}" step="1"><div class="scrub-times"><span>6 PM</span><span>8 PM</span><span>10 PM</span><span>12 AM</span></div><div class="map-summary"><div class="summary-item"><b style="color:var(--red)">${count}</b><small>events near hour</small></div><div class="summary-item"><b style="color:var(--orange)">${state.mbta.loading?'—':state.mbta.alerts.length}</b><small>alerts</small></div><div class="summary-item"><b style="color:var(--blue)">${state.bikes.loading?'—':(state.bikes.total||0).toLocaleString()}</b><small>bikes now</small></div><div class="summary-item"><b style="color:var(--green)">${activityAtHour(h)}</b><small>activity</small></div></div></div></div>`; }
+function destroyLiveMap(){
+  if(liveMap){ try{const c=liveMap.getCenter();state.mapView={lat:c.lat,lon:c.lng,zoom:liveMap.getZoom()};}catch(_){} try{liveMap.remove();}catch(_){} liveMap=null; }
+  mapLayerGroups={}; userMapMarker=null;
+}
+function mapToneColor(tone='green'){
+  return {green:'#78db78',orange:'#f3a13b',red:'#ff5d64',blue:'#5aa2ff',purple:'#ae72f8'}[tone]||'#78db78';
+}
+function mapEventOpacity(e,h=state.replayHour){
+  if(!e.start)return e.preview?.72:.82;
+  const d=new Date(e.start); if(Number.isNaN(d.getTime()))return .72;
+  return hourDistance(d.getHours(),h===24?0:h)<=2?1:.18;
+}
+function mapEventsForDisplay(){
+  let items=state.events.items.filter(e=>eventLatLon(e));
+  if(state.mapSavedOnly)items=items.filter(e=>state.saved.has(e.id));
+  return items.slice(0,140);
+}
+function mapEventIcon(e,estimated=false){
+  const c=mapToneColor(e.tone||'red');
+  const cls=`city-map-pin event-pin${estimated?' estimated':''}${state.saved.has(e.id)?' saved':''}`;
+  return L.divIcon({className:'city-map-icon',html:`<span class="${cls}" style="--pin:${c}">${esc(e.icon||'●')}</span>`,iconSize:[30,30],iconAnchor:[15,15]});
+}
+function addMapEventMarkers(){
+  const group=mapLayerGroups.events; if(!group||!window.L)return;
+  group.clearLayers();
+  mapEventsForDisplay().forEach(e=>{
+    const ll=eventLatLon(e); if(!ll)return;
+    const marker=L.marker([ll.lat,ll.lon],{icon:mapEventIcon(e,ll.estimated),opacity:mapEventOpacity(e),keyboard:true});
+    const source=ll.estimated?'Approximate location':(e.source||'CityLab');
+    marker.bindTooltip(`<b>${esc(e.title)}</b><br><span>${esc(e.time||formatEventTime(e.start))} · ${esc(e.price||'Details')}</span><br><small>${esc(source)}</small>`,{direction:'top',offset:[0,-12],opacity:.96,className:'city-map-tooltip'});
+    marker.on('click',()=>{state.activeEvent=findEvent(e.id);state.plannerOpen=false;render();});
+    marker.addTo(group);
+  });
+}
+function addMapBikeMarkers(){
+  const group=mapLayerGroups.bikes; if(!group||!window.L)return;
+  group.clearLayers();
+  const bikes=(state.bikes.stations||[]).filter(s=>Number.isFinite(Number(s.lat))&&Number.isFinite(Number(s.lon))).slice(0,120);
+  bikes.forEach(s=>{
+    const n=Number(s.num_bikes_available||0), docks=Number(s.num_docks_available||0);
+    const m=L.circleMarker([Number(s.lat),Number(s.lon)],{radius:Math.max(4,Math.min(8,4+n/8)),color:'#5aa2ff',weight:1,fillColor:'#247ed2',fillOpacity:.82,opacity:.9});
+    m.bindPopup(`<div class="map-popup"><b>${esc(s.name||'Bluebikes station')}</b><span>${n} bikes · ${docks} open docks</span></div>`);
+    m.addTo(group);
+  });
+}
+function addMapTransitMarkers(){
+  const group=mapLayerGroups.transit; if(!group||!window.L)return;
+  group.clearLayers();
+  TRANSIT_HUBS.forEach(s=>{
+    const c=mapToneColor(s.tone);
+    const icon=L.divIcon({className:'city-map-icon',html:`<span class="city-map-pin transit-pin" style="--pin:${c}">T</span>`,iconSize:[28,28],iconAnchor:[14,14]});
+    const m=L.marker([s.lat,s.lon],{icon});
+    m.bindPopup(`<div class="map-popup"><b>${esc(s.name)}</b><span>${esc(s.route)}</span></div>`);
+    m.addTo(group);
+  });
+}
+function addMapPulse(){
+  const group=mapLayerGroups.pulse; if(!group||!window.L)return;
+  group.clearLayers();
+  NEIGHBORHOODS.forEach(n=>{
+    const ll=latLonFromPos(n.x,n.y), st=neighborhoodStats(n);
+    const r=120+st.activity*80;
+    const circle=L.circle([ll.lat,ll.lon],{radius:r,color:'#ae72f8',weight:1,opacity:.28,fillColor:'#ae72f8',fillOpacity:.035+st.activity*.018,interactive:true});
+    circle.bindTooltip(`<b>${esc(n.name)}</b><br>${st.events} events · ${st.available} bikes`,{className:'city-map-tooltip',direction:'top'});
+    circle.addTo(group);
+  });
+}
+function updateMapLayerVisibility(){
+  if(!liveMap)return;
+  Object.entries(mapLayerGroups).forEach(([k,g])=>{ if(!g)return; const on=!!state.layers[k]; if(on&&!liveMap.hasLayer(g))g.addTo(liveMap); if(!on&&liveMap.hasLayer(g))liveMap.removeLayer(g); });
+  $$('[data-layer]').forEach(b=>b.classList.toggle('active',!!state.layers[b.dataset.layer]));
+  const saved=$('[data-map-saved]'); if(saved)saved.classList.toggle('active',state.mapSavedOnly);
+}
+function updateMapReplayUI(){
+  if(liveMap&&mapLayerGroups.events)addMapEventMarkers();
+  const h=state.replayHour, nowH=new Date().getHours(), isNow=hourDistance(h===24?0:h,nowH)<=0;
+  const title=$('#scrubTitle'); if(title)title.textContent=`${isNow?'Now':'City Replay'} · ${formatHour(h)}`;
+  const reset=$('[data-live-now]'); if(reset){reset.classList.toggle('is-live',isNow);reset.innerHTML=`<span class="live-dot"></span>${isNow?'Live':'Return live'}`;}
+  const ev=$('[data-map-event-count]'); if(ev)ev.textContent=replayEventCount(h);
+  const act=$('[data-map-activity]'); if(act)act.textContent=activityAtHour(h);
+}
+function initLiveMap(){
+  const host=$('#cityMap'); if(!host)return;
+  if(!window.L){host.innerHTML='<div class="map-fallback"><b>Map library unavailable</b><span>CityLab still has your city data. Reconnect and reopen Live City to load the geographic map.</span></div>';return;}
+  destroyLiveMap();
+  const mv=state.mapView||{lat:BOSTON_CENTER[0],lon:BOSTON_CENTER[1],zoom:13};
+  liveMap=L.map(host,{zoomControl:false,attributionControl:false,preferCanvas:true,minZoom:10,maxZoom:18,zoomSnap:.5,worldCopyJump:false}).setView([mv.lat,mv.lon],mv.zoom);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(liveMap);
+  liveMap.setMaxBounds([[42.25,-71.25],[42.44,-70.90]]);
+  mapLayerGroups={events:L.layerGroup(),transit:L.layerGroup(),bikes:L.layerGroup(),pulse:L.layerGroup()};
+  addMapPulse(); addMapBikeMarkers(); addMapTransitMarkers(); addMapEventMarkers(); updateMapLayerVisibility();
+  setTimeout(()=>liveMap?.invalidateSize(),40);
+  if(state.mapFocusEventId){const e=findEvent(state.mapFocusEventId),ll=eventLatLon(e);if(ll){setTimeout(()=>liveMap?.flyTo([ll.lat,ll.lon],15,{duration:.65}),80);}state.mapFocusEventId=null;}
+  else if(state.userLoc)setTimeout(()=>addUserToLiveMap(false),80);
+}
+function addUserToLiveMap(fly=true){
+  if(!liveMap||!state.userLoc||!window.L)return;
+  if(userMapMarker)userMapMarker.remove();
+  userMapMarker=L.circleMarker([state.userLoc.lat,state.userLoc.lon],{radius:8,color:'#ffffff',weight:3,fillColor:'#5aa2ff',fillOpacity:1}).bindTooltip('You are here',{permanent:false,direction:'top'}).addTo(liveMap);
+  if(fly)liveMap.flyTo([state.userLoc.lat,state.userLoc.lon],15,{duration:.65});
+}
+function locateUserOnMap(){
+  if(!navigator.geolocation){showToast('Location not available');return;}
+  navigator.geolocation.getCurrentPosition(pos=>{state.userLoc={lat:pos.coords.latitude,lon:pos.coords.longitude};addUserToLiveMap(true);showToast('Centered on your location');},()=>showToast('Location permission denied'),{enableHighAccuracy:false,timeout:6000,maximumAge:60000});
+}
+function renderLive(){
+  const h=state.replayHour, nowH=new Date().getHours(), isNow=hourDistance(h===24?0:h,nowH)<=0, count=replayEventCount(h);
+  return `<header class="header"><div><h1 style="font-size:30px">LIVE CITY</h1><div class="subhead">Real Boston geography · live CityLab layers.</div></div><div class="header-actions"><button class="icon-btn" data-location title="Find me">⌖</button><button class="icon-btn" data-refresh title="Refresh city data">↻</button></div></header>
+  <div class="map-shell real-map-shell">
+    <div id="cityMap" class="city-map" role="region" aria-label="Interactive map of Boston"></div>
+    <div class="map-filters">${[['events','● Events'],['transit','T Transit'],['bikes','♧ Bikes'],['pulse','◎ Pulse']].map(([k,l])=>`<button class="map-filter ${state.layers[k]?'active':''}" data-layer="${k}">${l}</button>`).join('')}<button class="map-filter saved-filter ${state.mapSavedOnly?'active':''}" data-map-saved>♡ Saved</button></div>
+    <div class="map-tools"><button data-map-home title="Reset Boston view">⌂</button><button data-location title="Find me">⌖</button></div>
+    <a class="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+    <div class="map-bottom">
+      <div class="scrub-label"><b id="scrubTitle">${isNow?'Now':'City Replay'} · ${formatHour(h)}</b><button class="live-reset ${isNow?'is-live':''}" data-live-now><span class="live-dot"></span>${isNow?'Live':'Return live'}</button></div>
+      <input class="scrubber" id="timeScrubber" type="range" min="0" max="24" value="${h}" step="1" aria-label="City replay hour">
+      <div class="scrub-times"><span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>12 AM</span></div>
+      <div class="map-summary"><div class="summary-item"><b style="color:var(--red)" data-map-event-count>${count}</b><small>events near hour</small></div><div class="summary-item"><b style="color:var(--orange)">${state.mbta.loading?'—':state.mbta.alerts.length}</b><small>alerts</small></div><div class="summary-item"><b style="color:var(--blue)">${state.bikes.loading?'—':(state.bikes.total||0).toLocaleString()}</b><small>bikes now</small></div><div class="summary-item"><b style="color:var(--green)" data-map-activity>${activityAtHour(h)}</b><small>activity</small></div></div>
+      <div class="map-legend"><span><i class="legend-solid"></i> precise</span><span><i class="legend-dashed"></i> approximate event location</span><span>Tap a marker for details</span></div>
+    </div>
+  </div>`;
+}
 
 function renderSaved(){ const events=savedEventsOrdered(); return `<header class="header"><div><h1 style="font-size:31px">SAVED</h1><div class="subhead">Your Boston shortlist.</div></div></header><div class="section"><div class="section-head"><div class="section-title">Events</div><span class="pill green">${events.length} saved</span></div><div class="card">${events.length?events.map(e=>eventRow(e,true)).join(''):`<div class="empty"><div class="big">♡</div><b>Nothing saved yet</b><p style="margin-top:6px">Save things from Discover and they’ll stay here even when live feeds refresh.</p></div>`}</div></div>${events.length>=2?`<div class="section"><div class="section-head"><div><div class="section-title">Tonight route</div><div class="microcopy">CityLab minimizes backtracking while respecting event order</div></div><button class="text-btn" data-optimize>Optimize</button></div><div class="card card-pad"><div style="display:flex;align-items:center;gap:12px"><div class="logo-mark">C</div><div><b>${events.length} stops · Boston</b><div class="subhead">Tap Optimize to reorder</div></div></div><div class="itinerary">${events.map((e,i)=>`<div class="itinerary-row"><span class="itinerary-dot">${i+1}</span><div><b>${esc(e.title)}</b><small>${esc(e.time||formatEventTime(e.start))} · ${esc(inferNeighborhood(e))}</small></div></div>`).join('')}</div></div></div>`:''}`; }
 
 function sourceState(label,ok,extra=''){ return `<div class="source-row"><div class="source-icon">${label.icon}</div><div class="source-copy"><b>${esc(label.name)}</b><p>${esc(label.desc)}${extra?` · ${esc(extra)}`:''}</p></div><span class="source-state ${ok?'live':'demo'}">${ok?'live':'fallback'}</span></div>`; }
-function renderMore(){ const liveEventCount=state.events.items.filter(e=>!e.preview).length; const busy=busiestNeighborhood(); const free=state.events.items.filter(e=>e.price==='FREE').length; const freeShare=state.events.items.length?Math.round(free/state.events.items.length*100):0; return `<header class="header"><div><div class="mini-logo"><div class="logo-mark">C</div><div><h2>CityLab V4</h2><div class="subhead">Boston intelligence console</div></div></div></div></header>
+function renderMore(){ const liveEventCount=state.events.items.filter(e=>!e.preview).length; const busy=busiestNeighborhood(); const free=state.events.items.filter(e=>e.price==='FREE').length; const freeShare=state.events.items.length?Math.round(free/state.events.items.length*100):0; return `<header class="header"><div><div class="mini-logo"><div class="logo-mark">C</div><div><h2>CityLab V5</h2><div class="subhead">Boston intelligence console</div></div></div></div></header>
   <div class="section"><div class="section-head"><div class="section-title">City data</div><button class="text-btn" data-refresh>Refresh</button></div><div class="data-grid"><div class="card data-card"><div class="kicker">Current listings</div><strong style="color:var(--green)">${liveEventCount||'—'}</strong><small>${state.events.source}</small></div><div class="card data-card"><div class="kicker">Civic permits</div><strong style="color:var(--orange)">${state.cityPermits.loading?'—':state.cityPermits.items.length}</strong><small>local outdoor events</small></div><div class="card data-card"><div class="kicker">Busiest area</div><strong class="text-stat" style="color:var(--purple)">${esc(busy?.n?.name||'—')}</strong><small>${busy?.events||0} events · ${busy?.available||0} bikes</small></div><div class="card data-card"><div class="kicker">Free share</div><strong style="color:var(--blue)">${freeShare}%</strong><small>of current CityLab listings</small></div><div class="card data-card"><div class="kicker">311 today</div><strong>${state.city311.today==null?'—':state.city311.today.toLocaleString()}</strong><small>${state.city311.error?'source unavailable':'Analyze Boston'}</small></div><div class="card data-card"><div class="kicker">Bike stations</div><strong>${state.bikes.stations.length||'—'}</strong><small>${(state.bikes.total||0).toLocaleString()} bikes available</small></div></div></div>
   <div class="section"><div class="section-head"><div class="section-title">Event integration</div></div><div class="card settings-card"><label for="tmKey">Ticketmaster Discovery API key <span class="muted-inline">optional</span></label><div class="key-row"><input id="tmKey" type="password" value="${esc(state.ticketmasterKey)}" placeholder="Paste API key"><button class="primary-btn" data-save-key>${state.ticketmasterKey?'Update':'Connect'}</button></div><p>CityLab now keeps Boston civic events even without a key. Ticketmaster adds concerts, sports, comedy, and other ticketed listings on top.</p>${state.ticketmasterKey?'<button class="danger-link" data-clear-key>Remove key</button>':''}</div></div>
   <div class="section"><div class="section-head"><div class="section-title">Sources</div></div><div class="card">${sourceState({icon:'T',name:'MBTA V3',desc:'Service alerts + arrival predictions'},!state.mbta.error,state.mbta.arrivalsMode)}${sourceState({icon:'♧',name:'Bluebikes GBFS',desc:'Live station and bike availability'},!state.bikes.error)}${sourceState({icon:'◎',name:'Boston.gov events',desc:'Official City of Boston event RSS'},!state.bostonGov.loading&&!state.bostonGov.error,state.bostonGov.lastUpdated?`updated ${state.bostonGov.lastUpdated}`:'')}${sourceState({icon:'✦',name:'Ticketmaster',desc:'Optional ticketed-event layer'},state.events.ticketmaster?.length>0,state.events.lastUpdated?`updated ${state.events.lastUpdated}`:'')}${sourceState({icon:'⌂',name:'Boston event permits',desc:'Special Event License Applications'},!state.cityPermits.loading&&!state.cityPermits.error,state.cityPermits.lastUpdated?`updated ${state.cityPermits.lastUpdated}`:'')}${sourceState({icon:'☏',name:'Analyze Boston',desc:'BOS:311 open-data probe'},state.city311.today!=null)}</div></div>
-  <div class="section"><div class="section-head"><div class="section-title">V4 changes</div></div><div class="card about-card"><p><b>Official Boston feed:</b> Discover now pulls the City of Boston event RSS as a richer source than permit records.</p><p><b>Smart dedupe:</b> overlapping listings are merged and the richer source wins instead of showing the same event twice.</p><p><b>Discovery ranking:</b> Best Tonight and Free & Interesting rank events by timing, source quality, detail richness, and what you save.</p><p><b>Nearby:</b> opt in to location and sort coordinate-rich listings by real distance; your coordinates stay in memory only.</p><p><b>Event actions:</b> share, directions, and downloadable calendar files now live in every event detail sheet.</p></div></div>`; }
+  <div class="section"><div class="section-head"><div class="section-title">V5 changes</div></div><div class="card about-card"><p><b>Real map:</b> Live City now uses an interactive OpenStreetMap basemap instead of the old schematic drawing.</p><p><b>Useful layers:</b> events, MBTA hubs, live Bluebikes, and neighborhood pulse can be toggled without resetting the map.</p><p><b>Better replay:</b> City Replay now spans the full 24-hour day and updates event visibility without snapping your map back to Boston.</p><p><b>Map accuracy:</b> listings with real coordinates are visually distinct from approximate neighborhood-level placements.</p><p><b>Event handoff:</b> every event detail sheet can jump directly to its location on Live City.</p></div></div>`; }
 
 function renderPlannerSheet(){ if(!state.plannerOpen)return ''; if(!state.plan.length)generatePlan(); const total=state.plan.reduce((a,e)=>a+(priceNumber(e.price)||0),0); return `<div class="sheet-backdrop" data-close-planner></div><section class="event-sheet planner-sheet" role="dialog" aria-modal="true"><div class="sheet-handle"></div><button class="sheet-close" data-close-planner>×</button><div class="planner-head"><span class="eyebrow">DO SOMETHING</span><h2>Build me a Boston plan.</h2><p>Uses CityLab's current event layer — not made-up recommendations.</p></div><div class="planner-controls"><label>When<select data-plan-when>${WHEN_FILTERS.map(v=>`<option ${v===state.planner.when?'selected':''}>${v}</option>`).join('')}</select></label><label>Budget<select data-plan-budget>${BUDGET_OPTIONS.map(v=>`<option ${v===state.planner.budget?'selected':''}>${v}</option>`).join('')}</select></label><label>Vibe<select data-plan-vibe>${VIBE_OPTIONS.map(v=>`<option ${v===state.planner.vibe?'selected':''}>${v}</option>`).join('')}</select></label></div><button class="planner-generate" data-generate-plan>✦ Regenerate plan</button><div class="plan-list">${state.plan.map((e,i)=>`<button class="plan-stop" data-open-event="${esc(e.id)}"><span class="plan-time">${i+1}</span><div>${eventThumb(e)}<span><b>${esc(e.title)}</b><small>${esc(e.time||formatEventTime(e.start))} · ${esc(inferNeighborhood(e))}</small><em>${esc(e.price||'Details')} · ${esc(e.source)}</em></span></div></button>`).join('')}</div><div class="plan-total"><div><span>Estimated listed cost</span><b>${total?`$${Math.round(total)}`:'Free / unknown'}</b></div><div><span>Stops</span><b>${state.plan.length}</b></div></div><button class="primary-btn planner-save" data-save-plan>Save this plan</button></section>`; }
 
-function renderEventSheet(){ const e=state.activeEvent; if(!e)return ''; const dist=eventDistanceLabel(e); const merged=(e.sources||[]).length>1?`<div class="merge-note">Matched across ${e.sources.map(esc).join(' + ')}</div>`:''; return `<div class="sheet-backdrop" data-close-sheet></div><section class="event-sheet" role="dialog" aria-modal="true"><div class="sheet-handle"></div><button class="sheet-close" data-close-sheet>×</button><div class="sheet-hero" style="background:${e.image?`linear-gradient(180deg,transparent,rgba(5,9,13,.85)),url('${esc(e.image)}') center/cover`:thumbGradient(e.tone)}"><div><span class="pill ${e.tone||'blue'}">${esc(e.category||'Event')}</span><h2>${esc(e.title)}</h2></div></div><div class="sheet-body"><div class="detail-line"><span>◷</span><div><b>${esc(eventDateLabel(e))}</b><small>${esc(e.time||formatEventTime(e.start))}</small></div></div><div class="detail-line"><span>⌖</span><div><b>${esc(e.venue||'Boston')}</b><small>${esc(e.neighborhood||'Boston')}${dist?' · '+esc(dist):''}</small></div></div><div class="detail-line"><span>＄</span><div><b>${esc(e.price||'See listing')}</b><small>${esc((e.sources||[e.source||'CityLab']).join(' + '))}</small></div></div>${merged}${e.info?`<p class="event-description">${esc(e.info)}</p>`:''}<div class="quick-actions"><button data-calendar="${esc(e.id)}">＋ Calendar</button><button data-share-event="${esc(e.id)}">↗ Share</button><button data-directions="${esc(e.id)}">⌖ Directions</button></div><div class="sheet-actions"><button class="secondary-btn ${state.saved.has(e.id)?'saved':''}" data-save="${esc(e.id)}">${state.saved.has(e.id)?'♥ Saved':'♡ Save'}</button>${e.url?`<a class="primary-btn link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">Open listing ↗</a>`:''}</div>${e.preview?'<div class="preview-note">This is a preview card, not a live event listing. Connect an event source in More for current listings.</div>':''}</div></section>`; }
+function renderEventSheet(){ const e=state.activeEvent; if(!e)return ''; const dist=eventDistanceLabel(e); const merged=(e.sources||[]).length>1?`<div class="merge-note">Matched across ${e.sources.map(esc).join(' + ')}</div>`:''; return `<div class="sheet-backdrop" data-close-sheet></div><section class="event-sheet" role="dialog" aria-modal="true"><div class="sheet-handle"></div><button class="sheet-close" data-close-sheet>×</button><div class="sheet-hero" style="background:${e.image?`linear-gradient(180deg,transparent,rgba(5,9,13,.85)),url('${esc(e.image)}') center/cover`:thumbGradient(e.tone)}"><div><span class="pill ${e.tone||'blue'}">${esc(e.category||'Event')}</span><h2>${esc(e.title)}</h2></div></div><div class="sheet-body"><div class="detail-line"><span>◷</span><div><b>${esc(eventDateLabel(e))}</b><small>${esc(e.time||formatEventTime(e.start))}</small></div></div><div class="detail-line"><span>⌖</span><div><b>${esc(e.venue||'Boston')}</b><small>${esc(e.neighborhood||'Boston')}${dist?' · '+esc(dist):''}</small></div></div><div class="detail-line"><span>＄</span><div><b>${esc(e.price||'See listing')}</b><small>${esc((e.sources||[e.source||'CityLab']).join(' + '))}</small></div></div>${merged}${e.info?`<p class="event-description">${esc(e.info)}</p>`:''}<div class="quick-actions"><button data-calendar="${esc(e.id)}">＋ Calendar</button><button data-share-event="${esc(e.id)}">↗ Share</button><button data-directions="${esc(e.id)}">⌖ Directions</button><button data-view-map="${esc(e.id)}">◎ Live Map</button></div><div class="sheet-actions"><button class="secondary-btn ${state.saved.has(e.id)?'saved':''}" data-save="${esc(e.id)}">${state.saved.has(e.id)?'♥ Saved':'♡ Save'}</button>${e.url?`<a class="primary-btn link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">Open listing ↗</a>`:''}</div>${e.preview?'<div class="preview-note">This is a preview card, not a live event listing. Connect an event source in More for current listings.</div>':''}</div></section>`; }
 
 function icsEscape(v=''){ return String(v).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n'); }
 function icsDate(d){return new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');}
 function addToCalendar(id){const e=findEvent(id);if(!e?.start){showToast('This listing has no exact date yet');return;}const st=new Date(e.start),en=new Date(st.getTime()+2*3600000);const text=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//CityLab//Boston//EN','BEGIN:VEVENT',`UID:${icsEscape(e.id)}@citylab`,`DTSTAMP:${icsDate(new Date())}`,`DTSTART:${icsDate(st)}`,`DTEND:${icsDate(en)}`,`SUMMARY:${icsEscape(e.title)}`,`LOCATION:${icsEscape([e.venue,e.address,e.neighborhood].filter(Boolean).join(', '))}`,`DESCRIPTION:${icsEscape(e.info||e.url||'Saved from CityLab')}`,'END:VEVENT','END:VCALENDAR'].join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/calendar'}));a.download=`${normalizeTitle(e.title).replace(/ /g,'-')||'citylab-event'}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);showToast('Calendar file created');}
 async function shareEvent(id){const e=findEvent(id);if(!e)return;const text=`${e.title} — ${e.time||formatEventTime(e.start)} · ${e.venue||'Boston'}`;try{if(navigator.share)await navigator.share({title:e.title,text,url:e.url||location.href});else{await navigator.clipboard.writeText(`${text}${e.url?' '+e.url:''}`);showToast('Event copied');}}catch(_){}}
 function directionsEvent(id){const e=findEvent(id);if(!e)return;const q=[e.venue,e.address,e.neighborhood,'Boston MA'].filter(Boolean).join(', ');window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`,'_blank','noopener');}
-function render(){ state.cityTime=new Date(); const screen=$('#screen'); screen.innerHTML=state.tab==='now'?renderNow():state.tab==='discover'?renderDiscover():state.tab==='live'?renderLive():state.tab==='saved'?renderSaved():renderMore(); $('#eventSheetHost').innerHTML=state.plannerOpen?renderPlannerSheet():renderEventSheet(); $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab)); bindScreen(); }
+function render(){ state.cityTime=new Date(); destroyLiveMap(); const screen=$('#screen'); screen.innerHTML=state.tab==='now'?renderNow():state.tab==='discover'?renderDiscover():state.tab==='live'?renderLive():state.tab==='saved'?renderSaved():renderMore(); $('#eventSheetHost').innerHTML=state.plannerOpen?renderPlannerSheet():renderEventSheet(); $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab)); bindScreen(); if(state.tab==='live')requestAnimationFrame(initLiveMap); }
 function bindScreen(){
   $$('[data-tab-jump]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tabJump;render();scrollTo(0,0)});
   $$('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category;render();});
@@ -234,10 +368,12 @@ function bindScreen(){
   $$('[data-open-planner]').forEach(b=>b.onclick=()=>{state.plannerOpen=true;state.activeEvent=null;generatePlan();render();});
   $$('[data-close-planner]').forEach(b=>b.onclick=()=>{state.plannerOpen=false;render();});
   $$('[data-refresh]').forEach(b=>b.onclick=()=>refreshLive(true));
-  $$('[data-layer]').forEach(b=>b.onclick=()=>{const k=b.dataset.layer;state.layers[k]=!state.layers[k];render();});
-  const scrub=$('#timeScrubber'); if(scrub)scrub.onchange=()=>{state.replayHour=Number(scrub.value);render();};
-  const liveNow=$('[data-live-now]'); if(liveNow)liveNow.onclick=()=>{state.replayHour=Math.min(24,Math.max(18,new Date().getHours()));render();};
-  const loc=$('[data-location]'); if(loc)loc.onclick=()=>locateUser(true);
+  $$('[data-layer]').forEach(b=>b.onclick=()=>{const k=b.dataset.layer;state.layers[k]=!state.layers[k];updateMapLayerVisibility();});
+  const mapSaved=$('[data-map-saved]'); if(mapSaved)mapSaved.onclick=()=>{state.mapSavedOnly=!state.mapSavedOnly;addMapEventMarkers();updateMapLayerVisibility();showToast(state.mapSavedOnly?'Showing saved events':'Showing all events');};
+  const scrub=$('#timeScrubber'); if(scrub)scrub.oninput=()=>{state.replayHour=Number(scrub.value);updateMapReplayUI();};
+  const liveNow=$('[data-live-now]'); if(liveNow)liveNow.onclick=()=>{state.replayHour=new Date().getHours();if(scrub)scrub.value=state.replayHour;updateMapReplayUI();};
+  $$('[data-location]').forEach(loc=>loc.onclick=()=>state.tab==='live'?locateUserOnMap():locateUser(true));
+  const home=$('[data-map-home]'); if(home)home.onclick=()=>liveMap?.flyTo(BOSTON_CENTER,13,{duration:.55});
   const nearby=$('[data-nearby-transit]'); if(nearby)nearby.onclick=()=>locateUser(false,true);
   $$('[data-refresh-arrivals]').forEach(b=>b.onclick=async()=>{await loadHubArrivals();render();showToast('Arrivals refreshed');});
   const search=$('#eventSearch'); if(search) search.oninput=()=>{state.query=search.value; clearTimeout(search._t); search._t=setTimeout(()=>render(),180);};
@@ -249,6 +385,7 @@ function bindScreen(){
   $$('[data-calendar]').forEach(b=>b.onclick=()=>addToCalendar(b.dataset.calendar));
   $$('[data-share-event]').forEach(b=>b.onclick=()=>shareEvent(b.dataset.shareEvent));
   $$('[data-directions]').forEach(b=>b.onclick=()=>directionsEvent(b.dataset.directions));
+  $$('[data-view-map]').forEach(b=>b.onclick=()=>{state.mapFocusEventId=b.dataset.viewMap;state.activeEvent=null;state.plannerOpen=false;state.tab='live';render();scrollTo(0,0);});
   $$('[data-neighborhood]').forEach(b=>b.onclick=()=>{state.query=b.dataset.neighborhood;state.category='All';render();scrollTo(0,0);});
   const source=$('[data-event-source]'); if(source)source.onclick=()=>{state.tab='more';render();scrollTo(0,0);};
   const saveKey=$('[data-save-key]'); if(saveKey)saveKey.onclick=async()=>{const key=($('#tmKey')?.value||'').trim(); if(!key){showToast('Paste an API key first');return;} state.ticketmasterKey=key;localStorage.setItem('citylab.ticketmasterKey',key);await loadTicketmasterEvents();render();showToast(state.events.ticketmaster?.length?'Ticketmaster layer connected':'Could not connect Ticketmaster');};

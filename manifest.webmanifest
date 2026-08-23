@@ -1,7 +1,7 @@
 {
   "name": "CityLab — Boston",
   "short_name": "CityLab",
-  "description": "Boston in real time: Boston.gov, ArtsBoston, BPL, Planning and ticketed events, plus a real interactive city map, transit, bikes, neighborhoods, and live city intelligence.",
+  "description": "Boston in real time with contextual nearby transit, actionable MBTA alerts, strict Today/Tonight event views, Boston.gov, ArtsBoston, BPL, Planning, City permits, optional Ticketmaster, live bikes, neighborhoods, and the interactive Live City map.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

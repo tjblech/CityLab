@@ -6,7 +6,7 @@ V7 keeps the GitHub-only V6.1 event pipeline and V5 geographic map, while rebuil
 
 - **Nearby Transit replaces random citywide trains.** With location permission, CityLab loads MBTA predictions around you. Without location, it shows no arbitrary train feed and lets you choose a station manually.
 - **Transit alerts are actionable.** Relevant alerts are shown inline, can be opened, include the full MBTA description/timeframe, and link to MBTA. When location is available, alerts are prioritized against nearby routes/stops.
-- **Today is strict.** Event date matching uses the `America/New_York` timezone. Only events active today count under Today; future events are separated into Coming Up. Multi-day events count on every day they are active when an end date is available.
+- **Today is strict.** Event date matching and source-date parsing use the `America/New_York` timezone. Only events active today count under Today; future events are separated into Coming Up. Multi-day events count on every day they are active when an end date is available.
 - **Tonight is separate.** The home page highlights events actually happening tonight rather than borrowing whatever filter was last used in Discover.
 - **Event end dates are preserved** from the GitHub-generated event dataset.
 - **Home visual hierarchy rebuilt.** A stronger city-status hero, contextual Near You section, image-led Tonight block, compact data metrics, Coming Up list, and fewer repetitive dark cards.
@@ -112,4 +112,4 @@ python -m http.server 8080
 
 Then open `http://localhost:8080`.
 
-The checked-in `data/events.json` starts empty in this package; run the GitHub workflow once to populate it with current events.
+The checked-in `data/events.json` contains the most recent successful refresh. The included GitHub workflow keeps it current and preserves the last good listings when an individual source is temporarily unavailable.

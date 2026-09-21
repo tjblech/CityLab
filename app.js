@@ -138,6 +138,7 @@ function formatHour(h){ const hh=h===24?0:h; if(hh===0)return '12 AM'; if(hh===1
 function hourDistance(a,b){ const d=Math.abs(a-b); return Math.min(d,24-d); }
 
 const BOSTON_TZ='America/New_York';
+const EVENT_CACHE_KEY='citylab.lastGoodEventDataset';
 function bostonParts(date=new Date()){
   if(typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)){const [year,month,day]=date.split('-').map(Number);return {year,month,day,hour:0,minute:0,key:date};}
   const d=date instanceof Date?date:new Date(date); if(Number.isNaN(d.getTime()))return null;
@@ -484,28 +485,41 @@ function calendarEventToCityLab(e,i){
   if(e.source==='Boston Planning'&&(!price||price==='Details'))price='FREE';
   return {id:`cal-${i}-${String(e.id||e.title||'event').replace(/[^a-z0-9_-]+/gi,'-').slice(0,70)}`,title:e.title||'Boston event',venue:e.venue||e.source||'Boston',address:e.address||'',neighborhood:hood,start:e.start||null,end:e.end||null,time:e.start?formatEventTime(e.start):'See listing',price,category,icon,tone,lat:hasGeo?lat:null,lon:hasGeo?lon:null,x:hasGeo?p.x:null,y:hasGeo?p.y:null,source:e.source||'Community calendar',preview:false,image:e.image||'',url:e.url||'',info:e.info||''};
 }
+function readCachedEventDataset(){try{const json=JSON.parse(localStorage.getItem(EVENT_CACHE_KEY)||'null');return Array.isArray(json?.events)&&json.events.length?json:null;}catch{return null;}}
+function cacheEventDataset(json){try{if(Array.isArray(json?.events)&&json.events.length)localStorage.setItem(EVENT_CACHE_KEY,JSON.stringify(json));}catch{}}
+function applyEventDataset(json,notice=null){
+  const mapped=(json.events||[]).map(calendarEventToCityLab).filter(Boolean);
+  state.eventDataset.generatedAt=json.generatedAt||null;
+  state.eventDataset.sources=json.sources||{};
+  state.bostonGov.items=mapped.filter(e=>e.source==='Boston.gov');
+  state.events.ticketmaster=mapped.filter(e=>e.source==='Ticketmaster');
+  state.cityPermits.items=mapped.filter(e=>e.source==='Boston permit');
+  state.calendars.items=mapped.filter(e=>['ArtsBoston','Boston Public Library','Boston Planning'].includes(e.source));
+  state.calendars.sources={arts:json.sources?.arts||{},bpl:json.sources?.bpl||{},planning:json.sources?.planning||{}};
+  const updated=json.generatedAt?new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(json.generatedAt)):'not generated yet';
+  state.calendars.lastUpdated=updated; state.bostonGov.lastUpdated=updated; state.cityPermits.lastUpdated=updated; state.events.lastUpdated=updated;
+  state.bostonGov.error=json.sources?.bostonGov?.ok||json.sources?.bostonGov?.stale?null:(json.sources?.bostonGov?.error||'GitHub event cache has no Boston.gov data yet');
+  state.cityPermits.error=json.sources?.permits?.ok||json.sources?.permits?.stale?null:(json.sources?.permits?.error||'GitHub event cache has no permit data yet');
+  const failed=Object.values(json.sources||{}).filter(x=>!x.ok&&!x.disabled&&!x.stale).map(x=>x.name);
+  state.events.error=notice;
+  state.calendars.error=notice||(failed.length?`${failed.join(', ')} unavailable on last refresh`:null);
+  rebuildEventLayer();
+}
 async function loadGitHubEventDataset(){
   state.calendars.loading=true; state.calendars.error=null; state.eventDataset.error=null;
   try{
-    const json=await fetchJson(`./data/events.json?v=${Date.now()}`,18000);
-    const mapped=(json.events||[]).map(calendarEventToCityLab).filter(Boolean);
-    state.eventDataset.generatedAt=json.generatedAt||null;
-    state.eventDataset.sources=json.sources||{};
-    state.bostonGov.items=mapped.filter(e=>e.source==='Boston.gov');
-    state.events.ticketmaster=mapped.filter(e=>e.source==='Ticketmaster');
-    state.cityPermits.items=mapped.filter(e=>e.source==='Boston permit');
-    state.calendars.items=mapped.filter(e=>['ArtsBoston','Boston Public Library','Boston Planning'].includes(e.source));
-    state.calendars.sources={arts:json.sources?.arts||{},bpl:json.sources?.bpl||{},planning:json.sources?.planning||{}};
-    const updated=json.generatedAt?new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(json.generatedAt)):'not generated yet';
-    state.calendars.lastUpdated=updated; state.bostonGov.lastUpdated=updated; state.cityPermits.lastUpdated=updated; state.events.lastUpdated=updated;
-    state.bostonGov.error=json.sources?.bostonGov?.ok||json.sources?.bostonGov?.stale?null:(json.sources?.bostonGov?.error||'GitHub event cache has no Boston.gov data yet');
-    state.cityPermits.error=json.sources?.permits?.ok||json.sources?.permits?.stale?null:(json.sources?.permits?.error||'GitHub event cache has no permit data yet');
-    const failed=Object.values(json.sources||{}).filter(x=>!x.ok&&!x.disabled&&!x.stale).map(x=>x.name);
-    state.calendars.error=failed.length?`${failed.join(', ')} unavailable on last refresh`:null;
-    rebuildEventLayer();
+    const fresh=await fetchJson(`./data/events.json?v=${Date.now()}`,18000);
+    if(Array.isArray(fresh.events)&&fresh.events.length){cacheEventDataset(fresh);applyEventDataset(fresh);}
+    else{
+      const cached=readCachedEventDataset();
+      if(cached){state.eventDataset.error='Latest refresh returned no listings';applyEventDataset(cached,'Latest refresh was empty; showing the last successful listings.');}
+      else{state.eventDataset.error='The event updater has not produced listings yet';applyEventDataset(fresh,'No current event listings are available yet.');}
+    }
   }catch(e){
     state.eventDataset.error=e.message; state.calendars.error=`GitHub event cache unavailable: ${e.message}`;
-    rebuildEventLayer();
+    const cached=readCachedEventDataset();
+    if(cached)applyEventDataset(cached,'Live refresh failed; showing the last successful listings.');
+    else{state.events.error=`Event listings unavailable: ${e.message}`;rebuildEventLayer();}
   }finally{state.calendars.loading=false;state.bostonGov.loading=false;state.cityPermits.loading=false;}
 }
 
